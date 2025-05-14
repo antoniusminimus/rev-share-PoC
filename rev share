@@ -1,0 +1,69 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+interface IERC20 {
+    function balanceOf(address account) external view returns (uint256);
+    function totalSupply() external view returns (uint256);
+    function transfer(address to, uint256 value) external returns (bool);
+    function transferFrom(address from, address to, uint256 value) external returns (bool);
+}
+
+contract RevenueShareAirdrop {
+    address public admin;
+    IERC20 public token; // LimitedToken
+    IERC20 public usdc;  // USDC Token
+
+    struct Airdrop {
+        uint256 totalUSDC;
+        uint256 totalSupplySnapshot;
+        mapping(address => bool) claimed;
+    }
+
+    uint256 public airdropCounter;
+    mapping(uint256 => Airdrop) public airdrops;
+    mapping(uint256 => mapping(address => uint256)) public userBalancesAtAirdrop;
+
+    event AirdropCreated(uint256 indexed id, uint256 amount);
+    event Claimed(address indexed user, uint256 indexed airdropId, uint256 amount);
+
+    constructor(address _token, address _usdc) {
+        admin = msg.sender;
+        token = IERC20(_token);
+        usdc = IERC20(_usdc);
+    }
+
+    function createAirdrop(uint256 amount) external {
+        require(msg.sender == admin, "Only admin");
+        require(usdc.transferFrom(msg.sender, address(this), amount), "Transfer failed");
+
+        Airdrop storage a = airdrops[airdropCounter];
+        a.totalUSDC = amount;
+        a.totalSupplySnapshot = token.totalSupply();
+
+        // Snapshot all token holders (off-chain recommended for gas saving!)
+        // Here's a note: You'd typically index this snapshot off-chain for gas reasons.
+
+        emit AirdropCreated(airdropCounter, amount);
+        airdropCounter++;
+    }
+
+    // Off-chain indexed snapshot setter (for testing or limited holders)
+    function setUserBalanceForAirdrop(uint256 id, address user, uint256 balance) external {
+        require(msg.sender == admin, "Only admin");
+        require(userBalancesAtAirdrop[id][user] == 0, "Already set");
+        userBalancesAtAirdrop[id][user] = balance;
+    }
+
+    function claim(uint256 id) external {
+        Airdrop storage a = airdrops[id];
+        require(!a.claimed[msg.sender], "Already claimed");
+        uint256 userBalance = userBalancesAtAirdrop[id][msg.sender];
+        require(userBalance > 0, "Not eligible or not set");
+
+        uint256 amount = (a.totalUSDC * userBalance) / a.totalSupplySnapshot;
+        a.claimed[msg.sender] = true;
+        require(usdc.transfer(msg.sender, amount), "USDC transfer failed");
+
+        emit Claimed(msg.sender, id, amount);
+    }
+}
